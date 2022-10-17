@@ -1,12 +1,17 @@
 package com.craftinginterpreters.lox;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     final Environment globals = new Environment();
+
     private Environment environment = globals;
+
+    private final Map<Expr, Integer> locals = new HashMap<>();
 
     Interpreter() {
         globals.define("clock", new LoxCallable() {
@@ -37,10 +42,81 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         }
     }
 
+    private Object evaluate(Expr expr) {
+        return expr.accept(this);
+    }
+
+    private void execute(Stmt stmt) {
+        stmt.accept(this);
+    }
+
+    void executeBlock(List<Stmt> statements, Environment environment) {
+        Environment previous = this.environment;
+        try {
+            this.environment = environment;
+            for (Stmt stmt : statements) {
+                execute(stmt);
+            }
+        } finally {
+            this.environment = previous;
+        }
+    }
+
+    private boolean isTruthy(Object object) {
+        if (object == null) return false;
+        if (object instanceof Boolean) return (boolean) object;
+        return true;
+    }
+
+    private boolean isEqual(Object a, Object b) {
+        if (a == null && b == null) return true;
+        if (a == null) return false;
+
+        return a.equals(b);
+    }
+
+    private void checkNumberOperand(Token token, Object operand) {
+        if (operand instanceof Double) return;
+        throw new RuntimeError(token, "Operand must be a number.");
+    }
+
+    private void checkNumberOperands(Token token, Object left, Object right) {
+        if (left instanceof Double && right instanceof Double) return;
+        throw new RuntimeError(token, "Operands must be a number.");
+    }
+
+    private String stringify(Object object) {
+        if (object == null) return "nil";
+
+        if (object instanceof Double) {
+            String text = object.toString();
+            if (text.endsWith(".0")) {
+                text = text.substring(0, text.length() - 2);
+            }
+            return text;
+        }
+
+        return object.toString();
+    }
+
+/////////////////////////////////////////////resolve/////////////////////////////////////////////////////
+
+    void resolve(Expr expr, int depth) {
+        locals.put(expr, depth);
+    }
+
+/////////////////////////////////////////////expression/////////////////////////////////////////////////////
+
     @Override
     public Object visitAssignExpr(Expr.Assign expr) {
         Object value = evaluate(expr.value);
-        environment.assign(expr.name, value);
+
+        Integer distance = locals.get(expr);
+        if (distance != null) {
+            environment.assignAt(distance, expr.name, value);
+        } else {
+            globals.assign(expr.name, value);
+        }
         return value;
     }
 
@@ -142,65 +218,19 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Object visitVariableExpr(Expr.Variable expr) {
-        return environment.get(expr.name);
+        return lookUpVariable(expr.name, expr);
     }
 
-    private Object evaluate(Expr expr) {
-        return expr.accept(this);
-    }
-
-    private void execute(Stmt stmt) {
-        stmt.accept(this);
-    }
-
-    void executeBlock(List<Stmt> statements, Environment environment) {
-        Environment previous = this.environment;
-        try {
-            this.environment = environment;
-            for (Stmt stmt : statements) {
-                execute(stmt);
-            }
-        } finally {
-            this.environment = previous;
+    private Object lookUpVariable(Token name, Expr expr) {
+        Integer distance = locals.get(expr);
+        if (distance != null) {
+            return environment.getAt(distance, name.lexeme);
+        } else {
+            return globals.get(name);
         }
     }
 
-    private boolean isTruthy(Object object) {
-        if (object == null) return false;
-        if (object instanceof Boolean) return (boolean) object;
-        return true;
-    }
-
-    private boolean isEqual(Object a, Object b) {
-        if (a == null && b == null) return true;
-        if (a == null) return false;
-
-        return a.equals(b);
-    }
-
-    private void checkNumberOperand(Token token, Object operand) {
-        if (operand instanceof Double) return;
-        throw new RuntimeError(token, "Operand must be a number.");
-    }
-
-    private void checkNumberOperands(Token token, Object left, Object right) {
-        if (left instanceof Double && right instanceof Double) return;
-        throw new RuntimeError(token, "Operands must be a number.");
-    }
-
-    private String stringify(Object object) {
-        if (object == null) return "nil";
-
-        if (object instanceof Double) {
-            String text = object.toString();
-            if (text.endsWith(".0")) {
-                text = text.substring(0, text.length() - 2);
-            }
-            return text;
-        }
-
-        return object.toString();
-    }
+/////////////////////////////////////////////statement/////////////////////////////////////////////////////
 
     @Override
     public Void visitBlockStmt(Stmt.Block stmt) {

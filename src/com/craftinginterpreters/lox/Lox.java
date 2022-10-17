@@ -55,16 +55,21 @@ public class Lox {
         List<Stmt> statements = parser.parse();
 
         if (hadError) return;
-        interpreter.interpreter(statements);
-    }
 
-    static void error(int line, String message) {
-        report(line, "", message);
+        Resolver resolver = new Resolver(interpreter);
+        resolver.resolve(statements);
+
+        if (hadError) return;
+        interpreter.interpreter(statements);
     }
 
     private static void report(int line, String where, String message) {
         System.out.println("[line " + line + "] Error" + where + ": " + message);
         hadError = true;
+    }
+
+    static void error(int line, String message) {
+        report(line, "", message);
     }
 
     static void error(Token token, String message) {
