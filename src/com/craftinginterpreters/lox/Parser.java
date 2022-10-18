@@ -23,6 +23,45 @@ public class Parser {
         return statements;
     }
 
+    /////////////////////////////////////////////token/////////////////////////////////////////////////////
+
+    private boolean match(TokenType... tokens) {
+        for (TokenType token : tokens) {
+            if (check(token)) {
+                advance();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Token consume(TokenType type, String message) {
+        if (check(type)) return advance();
+        throw error(peek(), message);
+    }
+
+    private boolean check(TokenType type) {
+        if (isAtEnd()) return false;
+        return peek().type == type;
+    }
+
+    private Token advance() {
+        if (!isAtEnd()) current++;
+        return previous();
+    }
+
+    private boolean isAtEnd() {
+        return peek().type == TokenType.EOF;
+    }
+
+    private Token peek() {
+        return tokens.get(current);
+    }
+
+    private Token previous() {
+        return tokens.get(current - 1);
+    }
+
 /////////////////////////////////////////////expression/////////////////////////////////////////////////////
 
     private Expr expression() {
@@ -39,6 +78,9 @@ public class Parser {
             if (expr instanceof Expr.Variable) {
                 Token name = ((Expr.Variable) expr).name;
                 return new Expr.Assign(name, value);
+            } else if (expr instanceof Expr.Get) {
+                Expr.Get get = (Expr.Get)expr;
+                return new Expr.Set(get.object, get.name, value);
             }
             throw error(equals, "Invalid assignment target.");
         }
@@ -123,8 +165,15 @@ public class Parser {
 
     private Expr call() {
         Expr expr = primary();
-        while (match(TokenType.LEFT_PAREN)) {
-            expr = finishCall(expr);
+        while (true) {
+            if (match(TokenType.LEFT_PAREN)) {
+                expr = finishCall(expr);
+            } else if (match(TokenType.DOT)) {
+                Token name = consume(TokenType.IDENTIFIER, "Expect property name after '.'.");
+                expr = new Expr.Get(expr, name);
+            } else {
+                break;
+            }
         }
         return expr;
     }
@@ -151,6 +200,8 @@ public class Parser {
 
         if (match(TokenType.STRING, TokenType.NUMBER)) return new Expr.Literal(previous().literal);
 
+        if (match(TokenType.THIS)) return new Expr.This(previous());
+
         if (match(TokenType.IDENTIFIER)) return new Expr.Variable(previous());
 
         if (match(TokenType.LEFT_PAREN)) {
@@ -162,50 +213,12 @@ public class Parser {
         throw error(peek(), "Expect expression.");
     }
 
-/////////////////////////////////////////////token/////////////////////////////////////////////////////
-
-    private boolean match(TokenType... tokens) {
-        for (TokenType token : tokens) {
-            if (check(token)) {
-                advance();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private Token consume(TokenType type, String message) {
-        if (check(type)) return advance();
-        throw error(peek(), message);
-    }
-
-    private boolean check(TokenType type) {
-        if (isAtEnd()) return false;
-        return peek().type == type;
-    }
-
-    private Token advance() {
-        if (!isAtEnd()) current++;
-        return previous();
-    }
-
-    private boolean isAtEnd() {
-        return peek().type == TokenType.EOF;
-    }
-
-    private Token peek() {
-        return tokens.get(current);
-    }
-
-    private Token previous() {
-        return tokens.get(current - 1);
-    }
-
 /////////////////////////////////////////////statement/////////////////////////////////////////////////////
 
     private Stmt declaration() {
         try {
             if (match(TokenType.VAR)) return varDeclaration();
+            if (match(TokenType.CLASS)) return classDeclaration();
             if (match(TokenType.FUN)) return function("function");
             return statement();
         } catch (ParseError error) {
@@ -225,7 +238,22 @@ public class Parser {
         return new Stmt.Var(name, initializer);
     }
 
-    private Stmt function(String kind) {
+    // class
+    private Stmt classDeclaration() {
+        Token name = consume(TokenType.IDENTIFIER, "Expect class name.");
+        consume(TokenType.LEFT_BRACE, "Expect '{' before class body.");
+
+        List<Stmt.Function> methods = new ArrayList<>();
+        while (!isAtEnd() && !check(TokenType.RIGHT_BRACE)) {
+            methods.add(function("method"));
+        }
+
+        consume(TokenType.RIGHT_BRACE, "Expect '}' after class body.");
+
+        return new Stmt.Class(name, methods);
+    }
+
+    private Stmt.Function function(String kind) {
         Token name = consume(TokenType.IDENTIFIER, "Expect " + kind + " name.");
 
         consume(TokenType.LEFT_PAREN, "Expect '(' after " + kind + " name.");
